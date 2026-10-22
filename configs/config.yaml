@@ -1,0 +1,15 @@
+# Configuración aislada para experimentos de RL tabular puro
+rl:
+  agent: "q_learning"
+  learning_rate: 0.1
+  gamma: 0.99
+  epsilon: 1.0
+  epsilon_decay: 0.995
+  epsilon_min: 0.01
+  episodes: 5000
+  max_steps: 200
+
+environment:
+  name: "FrozenLake-v1"
+  is_slippery: false
+  map_name: "4x4"
