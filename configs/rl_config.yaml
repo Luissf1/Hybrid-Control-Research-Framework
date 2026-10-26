@@ -1,0 +1,20 @@
+# ============================================================================
+# Standalone RL-only configuration.
+# Used by experiments/run_basic_rl.py (FrozenLake sanity check) and by
+# ablation studies that do not involve PSO or fuzzy logic.
+# ============================================================================
+
+rl:
+  agent: "q_learning"       # Reserved for future agents (e.g., SARSA)
+  learning_rate: 0.1        # Alpha
+  gamma: 0.99               # Discount factor
+  epsilon: 1.0              # Initial exploration
+  epsilon_decay: 0.995      # Decay per episode
+  epsilon_min: 0.01         # Exploration floor
+  episodes: 5000            # Episodes for FrozenLake
+  max_steps: 200            # Maximum steps per episode
+
+environment:
+  name: "FrozenLake-v1"
+  is_slippery: false        # Deterministic grid for early convergence
+  map_name: "4x4"

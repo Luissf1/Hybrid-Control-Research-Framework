@@ -1,0 +1,34 @@
+# Python virtual environments
+venv/
+venv_hybrid/
+.venv/
+env/
+
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Testing artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
+
+# Experiment artifacts (never version generated results)
+results/
+*.pkl
+*.png
+*.csv
+
+# Operating system files
+.DS_Store
+Thumbs.db
+
+# IDEs
+.vscode/
+.idea/
+*.swp

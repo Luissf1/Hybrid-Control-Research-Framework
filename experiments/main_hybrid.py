@@ -1,13 +1,23 @@
 """
-Script principal de la tesis: orquesta las tres fases del sistema híbrido.
+Main Orchestrator — Full Hybrid Pipeline
+=========================================
 
-Fase A: PSO optimiza el FuzzyController.
-Fase B: Q-Learning entrena en QuadrotorEnv.
-Fase C: Sistema híbrido RL + Difuso.
+Executes the three phases of the doctoral thesis pipeline:
+
+    Phase A: PSO optimizes the FuzzyController membership centers.
+    Phase B: Tabular Q-Learning trains on the QuadrotorEnv.
+    Phase C: Hybrid control — RL drives normally, fuzzy controller takes
+             over whenever |error| > threshold.
+
+Generated artifacts (inside results/):
+    - best_fuzzy_params.pkl
+    - rl_learning_curve.png
+    - hybrid_comparison.png
 """
 
 import os
 import pickle
+
 import yaml
 import numpy as np
 import matplotlib.pyplot as plt
@@ -18,25 +28,27 @@ from src.fuzzy.fuzzy_controller import FuzzyController
 from src.bio.pso_optimizer import FuzzyPSOOptimizer
 
 
-def load_config(path="configs/config.yaml"):
+def load_config(path: str = "configs/config.yaml") -> dict:
+    """Load the YAML configuration file."""
     with open(path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 
-def main():
+def main() -> None:
+    # ==================================================================
+    # 0. Load configuration and prepare output directory
+    # ==================================================================
     cfg = load_config()
-
-    results_dir = cfg["paths"]["results_dir"]
-    os.makedirs(results_dir, exist_ok=True)
+    os.makedirs(cfg["paths"]["results_dir"], exist_ok=True)
 
     print("=" * 60)
-    print("SISTEMA HÍBRIDO DE CONTROL ADAPTATIVO (Tesis Doctoral)")
+    print("HYBRID ADAPTIVE CONTROL SYSTEM (Doctoral Thesis)")
     print("=" * 60)
 
     # ==================================================================
-    # FASE A: PSO
+    # PHASE A — PSO optimizes the fuzzy controller
     # ==================================================================
-    print("\n[FASE A] Optimización del FuzzyController con PSO...")
+    print("\n[PHASE A] Optimizing FuzzyController with PSO...")
     pso_cfg = cfg["pso"]
 
     optimizer = FuzzyPSOOptimizer(
@@ -48,20 +60,20 @@ def main():
         ub_delta=pso_cfg["ub_delta"],
         seed=pso_cfg["seed"],
     )
-
     best_params = optimizer.optimize()
-    print(f"  Mejor MSE: {optimizer.best_mse:.6f}")
-    print(f"  Parámetros: {np.round(best_params, 4)}")
+    print(f"  Best MSE    : {optimizer.best_mse:.6f}")
+    print(f"  Parameters  : {np.round(best_params, 4)}")
 
+    # Persist the optimized parameters for later reuse
     fuzzy_params_file = cfg["paths"]["fuzzy_params_file"]
     with open(fuzzy_params_file, "wb") as f:
         pickle.dump(best_params, f)
-    print(f"  Guardado en: {fuzzy_params_file}")
+    print(f"  Saved to    : {fuzzy_params_file}")
 
     # ==================================================================
-    # FASE B: Q-Learning
+    # PHASE B — Tabular Q-Learning training
     # ==================================================================
-    print("\n[FASE B] Entrenamiento del agente Q-Learning...")
+    print("\n[PHASE B] Training tabular Q-Learning agent...")
     rl_cfg = cfg["rl"]
     env_cfg = cfg["environment"]
 
@@ -78,7 +90,7 @@ def main():
         epsilon=rl_cfg["epsilon"],
         epsilon_decay=rl_cfg["epsilon_decay"],
         epsilon_min=rl_cfg["epsilon_min"],
-        seed=rl_cfg.get("seed", None),
+        seed=rl_cfg.get("seed"),
     )
 
     action_space_size = env.action_space.n
@@ -105,47 +117,51 @@ def main():
 
         if (ep + 1) % 50 == 0:
             print(
-                f"  Ep {ep+1}/{episodes} | R: {total_reward:.2f} | "
-                f"eps: {agent.epsilon:.4f}"
+                f"  Episode {ep + 1}/{episodes} | "
+                f"reward: {total_reward:.2f} | "
+                f"epsilon: {agent.epsilon:.4f}"
             )
 
+    # Plot learning curve with a moving average
     window = 20
     moving_avg = np.convolve(
         episode_rewards, np.ones(window) / window, mode="valid"
     )
 
     plt.figure(figsize=(10, 5))
-    plt.plot(episode_rewards, alpha=0.3, label="Recompensa por episodio")
+    plt.plot(episode_rewards, alpha=0.3, label="Episode reward")
     plt.plot(
         range(window - 1, len(episode_rewards)),
         moving_avg,
         color="red",
         linewidth=2,
-        label=f"Media móvil (ventana={window})",
+        label=f"Moving average (window={window})",
     )
-    plt.xlabel("Episodio")
-    plt.ylabel("Recompensa acumulada")
-    plt.title("Curva de aprendizaje - Q-Learning tabular")
+    plt.xlabel("Episode")
+    plt.ylabel("Cumulative reward")
+    plt.title("Learning curve — Tabular Q-Learning")
     plt.legend()
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
     plt.savefig(cfg["paths"]["rl_curve_file"], dpi=150)
     plt.close()
-    print(f"  Curva guardada en: {cfg['paths']['rl_curve_file']}")
+    print(f"  Curve saved to: {cfg['paths']['rl_curve_file']}")
 
     # ==================================================================
-    # FASE C: Sistema híbrido
+    # PHASE C — Hybrid evaluation (RL + PSO-tuned fuzzy controller)
     # ==================================================================
-    print("\n[FASE C] Evaluación del sistema híbrido (RL + Difuso)...")
+    print("\n[PHASE C] Evaluating hybrid control (RL + fuzzy)...")
 
+    # Load PSO-tuned fuzzy controller
     fuzzy_controller = FuzzyController()
     with open(fuzzy_params_file, "rb") as f:
         loaded_params = pickle.load(f)
     fuzzy_controller.set_membership_params(loaded_params)
 
+    # Error threshold above which the fuzzy controller takes over
     error_threshold = 2.0
 
-    # --- Solo RL ---
+    # --- Baseline: RL only ---
     env_rl = QuadrotorEnv(
         max_steps=env_cfg["max_steps"],
         target_altitude=env_cfg["target_altitude"],
@@ -162,7 +178,7 @@ def main():
         state, _, done, truncated, info = env_rl.step(action)
         altitudes_rl.append(info["altitude"])
 
-    # --- Híbrido ---
+    # --- Hybrid: RL with fuzzy safety override ---
     env_hybrid = QuadrotorEnv(
         max_steps=env_cfg["max_steps"],
         target_altitude=env_cfg["target_altitude"],
@@ -171,47 +187,49 @@ def main():
     )
     state, _ = env_hybrid.reset()
     altitudes_hybrid = [env_hybrid.altitude]
-    prev_error = env_cfg["target_altitude"] - env_hybrid.altitude
+    previous_error = env_cfg["target_altitude"] - env_hybrid.altitude
     done = False
     truncated = False
 
     while not (done or truncated):
         error = env_cfg["target_altitude"] - env_hybrid.altitude
-        delta_error = error - prev_error
-        prev_error = error
+        delta_error = error - previous_error
+        previous_error = error
 
         if abs(error) > error_threshold:
+            # Fuzzy controller stabilizes; map its [-2, 2] output to [0, 4]
             u_fuzzy = fuzzy_controller.compute(error, delta_error)
             action = int(np.clip(round((u_fuzzy + 2.0) / 4.0 * 4.0), 0, 4))
         else:
+            # RL agent governs close to the reference
             action = agent.choose_action(state, action_space_size, explore=False)
 
         state, _, done, truncated, info = env_hybrid.step(action)
         altitudes_hybrid.append(info["altitude"])
 
-    # --- Gráfica comparativa ---
+    # --- Comparative plot ---
     plt.figure(figsize=(12, 6))
-    plt.plot(altitudes_rl, label="Solo RL (Q-Learning)", linewidth=2)
-    plt.plot(altitudes_hybrid, label="Híbrido (RL + Difuso PSO)", linewidth=2)
+    plt.plot(altitudes_rl, label="RL only (Q-Learning)", linewidth=2)
+    plt.plot(altitudes_hybrid, label="Hybrid (RL + PSO-tuned fuzzy)", linewidth=2)
     plt.axhline(
         y=env_cfg["target_altitude"],
         color="black",
         linestyle="--",
         linewidth=1,
-        label=f"Objetivo ({env_cfg['target_altitude']} m)",
+        label=f"Set-point ({env_cfg['target_altitude']} m)",
     )
-    plt.xlabel("Paso de simulación")
-    plt.ylabel("Altitud (m)")
-    plt.title("Comparación: Control solo RL vs. Control Híbrido")
+    plt.xlabel("Simulation step")
+    plt.ylabel("Altitude (m)")
+    plt.title("Comparison: RL-only vs. Hybrid control")
     plt.legend()
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
     plt.savefig(cfg["paths"]["hybrid_comparison_file"], dpi=150)
     plt.close()
-    print(f"  Gráfica guardada en: {cfg['paths']['hybrid_comparison_file']}")
+    print(f"  Comparison saved to: {cfg['paths']['hybrid_comparison_file']}")
 
     print("\n" + "=" * 60)
-    print("PROCESO COMPLETADO EXITOSAMENTE")
+    print("PIPELINE COMPLETED SUCCESSFULLY")
     print("=" * 60)
 
 
