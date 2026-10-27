@@ -16,16 +16,23 @@ Each variable is described by 5 triangular membership functions:
     PS = Positive Small
     PB = Positive Big
 
-Rule base (5 diagonal rules):
+Design notes
+------------
+1. Full 5x5 rule grid (25 rules), not just the diagonal. The diagonal
+   alone leaves large regions of the (error, delta_error) plane with
+   no active rule, causing the controller to fall back to 0.0 — which
+   is exactly what we do NOT want when the system is far from the
+   set-point.
 
-    IF error IS NB AND delta IS NB THEN action IS NB
-    IF error IS NS AND delta IS NS THEN action IS NS
-    IF error IS ZE AND delta IS ZE THEN action IS ZE
-    IF error IS PS AND delta IS PS THEN action IS PS
-    IF error IS PB AND delta IS PB THEN action IS PB
+2. "Shoulder" membership functions at the universe boundaries: the
+   NB and PB triangles reach full membership at x = ±universe_limit
+   rather than tapering to zero there. This guarantees that, for ANY
+   input in the universe, at least one membership function has a
+   non-zero degree, so skfuzzy can always activate a rule.
 
-This configuration is functionally equivalent to a fuzzy PD controller
-and can be optimized by PSO via `set_membership_params()`.
+3. The PSO tunes only the ANTECEDENT centers (error and delta_error).
+   The consequent (control_action) is kept fixed with sensible
+   defaults. This matches the decision vector of 10 dimensions.
 """
 
 import numpy as np
@@ -35,19 +42,31 @@ from skfuzzy import control as ctrl
 
 class FuzzyController:
     """
-    Mamdani fuzzy controller with tunable membership parameters
-    (designed to be optimized by PSO).
+    Mamdani fuzzy controller with tunable membership parameters.
+
+    Designed to be optimized by the PSO module: `set_membership_params`
+    updates the centers of the triangular membership functions, and the
+    inference system is rebuilt automatically.
     """
 
     LABELS = ["NB", "NS", "ZE", "PS", "PB"]
+
+    # Rule table (5x5): rows = error, cols = delta_error.
+    #                delta:  NB    NS    ZE    PS    PB
+    RULE_TABLE = [
+        ["NB", "NB", "NB", "NS", "ZE"],   # error NB
+        ["NB", "NB", "NS", "ZE", "PS"],   # error NS
+        ["NB", "NS", "ZE", "PS", "PB"],   # error ZE
+        ["NS", "ZE", "PS", "PB", "PB"],   # error PS
+        ["ZE", "PS", "PB", "PB", "PB"],   # error PB
+    ]
 
     def __init__(self, resolution: int = 101) -> None:
         """
         Parameters
         ----------
         resolution : int
-            Number of points in each universe of discourse (higher =
-            more precise defuzzification, at a higher computational cost).
+            Number of points in each universe of discourse.
         """
         self.resolution = resolution
 
@@ -62,26 +81,31 @@ class FuzzyController:
         self.control_action = ctrl.Consequent(self.universe_control, "control_action")
 
         # --- Default triangular parameters [a, b, c] for each label ---
+        # Shoulder functions (NB and PB) reach full membership at the
+        # universe edges to guarantee coverage for every input.
+        # For 'error' (universe [-5, 5]):
         self.default_params_error = np.array([
-            [-5.0, -4.0, -2.5],   # NB
+            [-5.0, -5.0, -2.5],   # NB: shoulder at -5
             [-3.5, -2.0, -0.5],   # NS
             [-1.0,  0.0,  1.0],   # ZE
             [ 0.5,  2.0,  3.5],   # PS
-            [ 2.5,  4.0,  5.0],   # PB
+            [ 2.5,  5.0,  5.0],   # PB: shoulder at +5
         ])
+        # For 'delta_error' (universe [-2, 2]):
         self.default_params_delta = np.array([
-            [-2.0, -1.6, -1.0],
-            [-1.4, -0.8, -0.2],
-            [-0.4,  0.0,  0.4],
-            [ 0.2,  0.8,  1.4],
-            [ 1.0,  1.6,  2.0],
+            [-2.0, -2.0, -1.0],   # NB: shoulder at -2
+            [-1.4, -0.8, -0.2],   # NS
+            [-0.4,  0.0,  0.4],   # ZE
+            [ 0.2,  0.8,  1.4],   # PS
+            [ 1.0,  2.0,  2.0],   # PB: shoulder at +2
         ])
+        # For 'control_action' (universe [-2, 2]):
         self.default_params_control = np.array([
-            [-2.0, -1.6, -1.0],
-            [-1.4, -0.8, -0.2],
-            [-0.4,  0.0,  0.4],
-            [ 0.2,  0.8,  1.4],
-            [ 1.0,  1.6,  2.0],
+            [-2.0, -2.0, -1.0],   # NB: shoulder at -2
+            [-1.4, -0.8, -0.2],   # NS
+            [-0.4,  0.0,  0.4],   # ZE
+            [ 0.2,  0.8,  1.4],   # PS
+            [ 1.0,  2.0,  2.0],   # PB: shoulder at +2
         ])
 
         # Build the initial inference system
@@ -105,14 +129,23 @@ class FuzzyController:
             )
 
     def _build_rules(self) -> None:
-        """Generate the 5 diagonal rules described in the module docstring."""
-        self.rules = [
-            ctrl.Rule(self.error["NB"] & self.delta_error["NB"], self.control_action["NB"]),
-            ctrl.Rule(self.error["NS"] & self.delta_error["NS"], self.control_action["NS"]),
-            ctrl.Rule(self.error["ZE"] & self.delta_error["ZE"], self.control_action["ZE"]),
-            ctrl.Rule(self.error["PS"] & self.delta_error["PS"], self.control_action["PS"]),
-            ctrl.Rule(self.error["PB"] & self.delta_error["PB"], self.control_action["PB"]),
-        ]
+        """
+        Build the full 5x5 rule grid (25 rules).
+
+        The full grid guarantees that every (error, delta_error) pair
+        activates at least one rule, which is essential for the hybrid
+        controller operating at large errors.
+        """
+        self.rules = []
+        for i, err_label in enumerate(self.LABELS):
+            for j, der_label in enumerate(self.LABELS):
+                out_label = self.RULE_TABLE[i][j]
+                self.rules.append(
+                    ctrl.Rule(
+                        self.error[err_label] & self.delta_error[der_label],
+                        self.control_action[out_label],
+                    )
+                )
 
     def _build_simulation(self) -> None:
         """Create the fuzzy control system and its simulator."""
@@ -124,15 +157,11 @@ class FuzzyController:
     # ------------------------------------------------------------------
     def set_membership_params(self, params_array: np.ndarray) -> None:
         """
-        Update the centers of the triangular membership functions
-        (invoked by the PSO optimizer).
+        Update the centers of the triangular membership functions.
 
-        Parameters
-        ----------
-        params_array : np.ndarray
-            Length-10 vector:
-            [err_NB, err_NS, err_ZE, err_PS, err_PB,
-             der_NB, der_NS, der_ZE, der_PS, der_PB]
+        The outermost triangles (NB and PB) are built as shoulder
+        functions that saturate at the universe boundary, so the edges
+        of the input space remain covered after PSO tuning.
         """
         centers_error = params_array[:5]
         centers_delta = params_array[5:10]
@@ -141,17 +170,35 @@ class FuzzyController:
         params_delta = np.zeros((5, 3))
 
         for i in range(5):
-            # Error centers with a half-base of ±1.5
+            # --- error membership functions ---
             c_err = centers_error[i]
-            a_err = max(-5.0, c_err - 1.5)
-            b_err = min(5.0, c_err + 1.5)
-            params_error[i] = [a_err, c_err, b_err]
+            if i == 0:
+                # NB: shoulder at -5
+                params_error[i] = [-5.0, -5.0, min(5.0, c_err + 1.5)]
+            elif i == 4:
+                # PB: shoulder at +5
+                params_error[i] = [max(-5.0, c_err - 1.5), 5.0, 5.0]
+            else:
+                params_error[i] = [
+                    max(-5.0, c_err - 1.5),
+                    c_err,
+                    min(5.0, c_err + 1.5),
+                ]
 
-            # Delta centers with a half-base of ±0.6
+            # --- delta_error membership functions ---
             c_del = centers_delta[i]
-            a_del = max(-2.0, c_del - 0.6)
-            b_del = min(2.0, c_del + 0.6)
-            params_delta[i] = [a_del, c_del, b_del]
+            if i == 0:
+                # NB: shoulder at -2
+                params_delta[i] = [-2.0, -2.0, min(2.0, c_del + 0.6)]
+            elif i == 4:
+                # PB: shoulder at +2
+                params_delta[i] = [max(-2.0, c_del - 0.6), 2.0, 2.0]
+            else:
+                params_delta[i] = [
+                    max(-2.0, c_del - 0.6),
+                    c_del,
+                    min(2.0, c_del + 0.6),
+                ]
 
         # Rebuild the whole inference system with the new parameters
         self._build_membership_functions(params_error, params_delta)
@@ -173,7 +220,7 @@ class FuzzyController:
         Returns
         -------
         float
-            Defuzzified control action.
+            Defuzzified control action in [-2, 2].
         """
         # Clip inputs to their universes of discourse
         error_clipped = float(np.clip(error, -5.0, 5.0))
@@ -187,6 +234,6 @@ class FuzzyController:
             self.simulation.compute()
             return float(self.simulation.output["control_action"])
         except Exception:
-            # Safe fallback: if no rule fires (e.g., error and delta in
-            # opposite quadrants with only diagonal rules), return neutral 0.0
+            # With full rule coverage and shoulder MFs this should never
+            # trigger, but we keep it as a defensive measure.
             return 0.0

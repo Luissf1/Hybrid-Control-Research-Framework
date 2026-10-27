@@ -1,15 +1,50 @@
-# Configuración aislada para experimentos de RL tabular puro
-rl:
-  agent: "q_learning"
-  learning_rate: 0.1
-  gamma: 0.99
-  epsilon: 1.0
-  epsilon_decay: 0.995
-  epsilon_min: 0.01
-  episodes: 5000
-  max_steps: 200
+# ============================================================================
+# Centralized configuration for the hybrid adaptive control pipeline.
+#
+# Every hyperparameter lives here so that experiments can be reproduced
+# by editing a single file, without touching source code.
+# ============================================================================
 
+# ----------------------------------------------------------------------------
+# Simulation environment (simplified quadrotor)
+# ----------------------------------------------------------------------------
 environment:
-  name: "FrozenLake-v1"
-  is_slippery: false
-  map_name: "4x4"
+  max_steps: 200            # Maximum steps per episode (timeout)
+  target_altitude: 5.0      # Altitude set-point in meters
+  tilt_limit: 30.0          # Tilt threshold (deg) that terminates the episode
+  dt: 0.05                  # Euler integration step in seconds
+
+# ----------------------------------------------------------------------------
+# Tabular Q-Learning agent
+# ----------------------------------------------------------------------------
+rl:
+  alpha: 0.1                # Learning rate
+  gamma: 0.99               # Discount factor
+  epsilon: 1.0              # Initial exploration probability (100%)
+  epsilon_decay: 0.995      # Multiplicative decay applied per episode
+  epsilon_min: 0.01         # Exploration floor
+  episodes: 500             # Total training episodes
+  seed: 42                  # Global seed for reproducibility
+
+# ----------------------------------------------------------------------------
+# PSO used to tune fuzzy membership centers
+# ----------------------------------------------------------------------------
+pso:
+  num_particles: 30         # Swarm size
+  max_iter: 50              # Number of PSO iterations
+  # The first 5 centers belong to 'error'       (universe [-5, 5])
+  # The next  5 centers belong to 'delta_error' (universe [-2, 2])
+  lb_error: -4.0
+  ub_error: 4.0
+  lb_delta: -1.6
+  ub_delta: 1.6
+  seed: 42
+
+# ----------------------------------------------------------------------------
+# Output paths (auto-created on first run)
+# ----------------------------------------------------------------------------
+paths:
+  results_dir: "results"
+  fuzzy_params_file: "results/best_fuzzy_params.pkl"
+  rl_curve_file: "results/rl_learning_curve.png"
+  hybrid_comparison_file: "results/hybrid_comparison.png"

@@ -1,0 +1,38 @@
+# pyproject.toml — place at project root
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "phd-hybrid-control"
+version = "0.1.0"
+description = "Hybrid RL + Fuzzy + PSO control framework (doctoral thesis)"
+requires-python = ">=3.10"
+dependencies = [
+    # ---- Numeric / scientific core ----
+    # numpy 2.x is required for Python 3.13 wheels.
+    # mealpy 3.0.3 nominally pins numpy<=1.26, but that pin only affects
+    # binary builds of numpy itself. On Python 3.13, there are no numpy
+    # 1.26 wheels, so we must use numpy 2.x. The algorithms in this repo
+    # do not use any numpy API deprecated after 1.26, so 2.x is safe.
+    "numpy>=2.0.0",
+    "scipy>=1.11.0",
+
+    # ---- Fuzzy logic ----
+    "scikit-fuzzy==0.5.0",
+    "networkx>=3.0",           # required by scikit-fuzzy for rule graphs
+
+    # ---- Bio-inspired optimization ----
+    "mealpy>=3.0.0,<3.2.0",    # 3.x provides FloatVar and g_best
+
+    # ---- Simulation ----
+    "gymnasium>=1.0.0,<2.0.0",
+
+    # ---- Utilities ----
+    "matplotlib>=3.8.0",
+    "pyyaml>=6.0.0",
+    "pandas>=2.0.0",
+]
+
+[tool.setuptools.packages.find]
+include = ["src*"]

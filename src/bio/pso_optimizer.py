@@ -122,7 +122,7 @@ class FuzzyPSOOptimizer:
         )
         self.model.solve(problem=problem)
 
-        self.best_params = np.array(self.model.solution, dtype=float)
-        self.best_mse = float(self.model.fitness)
+        self.best_params = np.array(self.model.g_best.solution, dtype=float)
+        self.best_mse = float(self.model.g_best.target.fitness)
 
         return self.best_params
