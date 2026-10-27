@@ -1,8 +1,5 @@
 # ============================================================================
 # Centralized configuration for the hybrid adaptive control pipeline.
-#
-# Every hyperparameter lives here so that experiments can be reproduced
-# by editing a single file, without touching source code.
 # ============================================================================
 
 # ----------------------------------------------------------------------------
@@ -23,7 +20,7 @@ rl:
   epsilon: 1.0              # Initial exploration probability (100%)
   epsilon_decay: 0.995      # Multiplicative decay applied per episode
   epsilon_min: 0.01         # Exploration floor
-  episodes: 500             # Total training episodes
+  episodes: 1000            # Increased from 500 so the agent can exploit
   seed: 42                  # Global seed for reproducibility
 
 # ----------------------------------------------------------------------------
@@ -31,9 +28,7 @@ rl:
 # ----------------------------------------------------------------------------
 pso:
   num_particles: 30         # Swarm size
-  max_iter: 50              # Number of PSO iterations
-  # The first 5 centers belong to 'error'       (universe [-5, 5])
-  # The next  5 centers belong to 'delta_error' (universe [-2, 2])
+  max_iter: 30              # Reduced from 50 to save time (still converges)
   lb_error: -4.0
   ub_error: 4.0
   lb_delta: -1.6

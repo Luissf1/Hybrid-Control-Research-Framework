@@ -2,17 +2,7 @@
 Main Orchestrator — Full Hybrid Pipeline
 =========================================
 
-Executes the three phases of the doctoral thesis pipeline:
-
-    Phase A: PSO optimizes the FuzzyController membership centers.
-    Phase B: Tabular Q-Learning trains on the QuadrotorEnv.
-    Phase C: Hybrid control — RL drives normally, fuzzy controller takes
-             over whenever |error| > threshold.
-
-Generated artifacts (inside results/):
-    - best_fuzzy_params.pkl
-    - rl_learning_curve.png
-    - hybrid_comparison.png
+Executes the three phases of the doctoral thesis pipeline.
 """
 
 import os
@@ -29,15 +19,11 @@ from src.bio.pso_optimizer import FuzzyPSOOptimizer
 
 
 def load_config(path: str = "configs/config.yaml") -> dict:
-    """Load the YAML configuration file."""
     with open(path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 
 def main() -> None:
-    # ==================================================================
-    # 0. Load configuration and prepare output directory
-    # ==================================================================
     cfg = load_config()
     os.makedirs(cfg["paths"]["results_dir"], exist_ok=True)
 
@@ -64,7 +50,6 @@ def main() -> None:
     print(f"  Best MSE    : {optimizer.best_mse:.6f}")
     print(f"  Parameters  : {np.round(best_params, 4)}")
 
-    # Persist the optimized parameters for later reuse
     fuzzy_params_file = cfg["paths"]["fuzzy_params_file"]
     with open(fuzzy_params_file, "wb") as f:
         pickle.dump(best_params, f)
@@ -115,14 +100,13 @@ def main() -> None:
         agent.decay_epsilon()
         episode_rewards.append(total_reward)
 
-        if (ep + 1) % 50 == 0:
+        if (ep + 1) % 100 == 0:
             print(
                 f"  Episode {ep + 1}/{episodes} | "
                 f"reward: {total_reward:.2f} | "
                 f"epsilon: {agent.epsilon:.4f}"
             )
 
-    # Plot learning curve with a moving average
     window = 20
     moving_avg = np.convolve(
         episode_rewards, np.ones(window) / window, mode="valid"
@@ -152,13 +136,11 @@ def main() -> None:
     # ==================================================================
     print("\n[PHASE C] Evaluating hybrid control (RL + fuzzy)...")
 
-    # Load PSO-tuned fuzzy controller
     fuzzy_controller = FuzzyController()
     with open(fuzzy_params_file, "rb") as f:
         loaded_params = pickle.load(f)
     fuzzy_controller.set_membership_params(loaded_params)
 
-    # Error threshold above which the fuzzy controller takes over
     error_threshold = 2.0
 
     # --- Baseline: RL only ---
@@ -197,9 +179,21 @@ def main() -> None:
         previous_error = error
 
         if abs(error) > error_threshold:
-            # Fuzzy controller stabilizes; map its [-2, 2] output to [0, 4]
+            # --- CORRECTED MAPPING ---
+            # The fuzzy controller returns a corrective signal in [-2, 2].
+            # Positive = "go up", Negative = "go down".
+            # We map this continuous signal to the discrete action space
+            # by finding the closest commanded acceleration.
             u_fuzzy = fuzzy_controller.compute(error, delta_error)
-            action = int(np.clip(round((u_fuzzy + 2.0) / 4.0 * 4.0), 0, 4))
+            
+            # The environment expects accelerations {0: +1.0, 1: +0.5, 2: 0.0, 3: -0.5, 4: -1.0}
+            # We find the action whose acceleration is closest to u_fuzzy / 2.0
+            # (because u_fuzzy ∈ [-2, 2] and accel ∈ [-1, 1])
+            target_accel = u_fuzzy / 2.0
+            accel_table = [1.0, 0.5, 0.0, -0.5, -1.0]
+            
+            # Find index of the closest acceleration
+            action = int(np.argmin([abs(target_accel - a) for a in accel_table]))
         else:
             # RL agent governs close to the reference
             action = agent.choose_action(state, action_space_size, explore=False)
